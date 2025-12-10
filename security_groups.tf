@@ -2,7 +2,6 @@
 # Public facing: Allows HTTP/HTTPS from everywhere (IPv4 + IPv6)
 module "alb_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "~> 5.0"
 
   name        = "alb-sg"
   description = "Public Load Balancer Security Group"

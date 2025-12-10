@@ -1,6 +1,5 @@
 module "db" {
   source  = "terraform-aws-modules/rds/aws"
-  version = "~> 6.0"
 
   identifier = "sec-assignment-db"
 
@@ -18,13 +17,10 @@ module "db" {
   password = var.db_password
   port     = 5432
 
-  # IPv6
   network_type = "DUAL"
 
   subnet_ids = module.vpc.intra_subnets
 
-  # --- Security Integration ---
-  # Use the explicit DB SG created in security_groups.tf
   vpc_security_group_ids = [module.db_sg.security_group_id]
 
   create_db_subnet_group = true
