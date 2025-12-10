@@ -1,6 +1,20 @@
 # aws-eks-example
 
-This repository contains Terraform code to provision a secure, 3-tier AWS architecture containing an EKS cluster and an RDS database.
+This repository contains Terraform code to provision a secure, production-ready AWS infrastructure featuring an IPv6-native EKS cluster with Bottlerocket nodes and an isolated PostgreSQL RDS database.
+
+## Code Organization
+
+The Terraform configuration is organized into logical, single-purpose files for maintainability and clarity:
+
+- **versions.tf** - Terraform version constraints, provider configuration, and default resource tags
+- **variables.tf** - Input variable definitions with sensible defaults and security flags
+- **outputs.tf** - Exposed values for cluster access and database connectivity
+- **vpc.tf** - VPC networking infrastructure with dual-stack IPv4/IPv6 support
+- **security_groups.tf** - Three-tier security group architecture (ALB → Workload → Database)
+- **eks.tf** - EKS cluster configuration, managed node groups, addons, and IAM roles
+- **rds.tf** - PostgreSQL database instance in isolated subnets
+
+This separation follows Terraform best practices by grouping related resources while keeping files focused and manageable. Each file can be understood independently while the module dependencies create clear resource relationships.
 
 ## Architecture & Security Decisions
 
@@ -11,20 +25,31 @@ I utilized a **3-tier subnet strategy** to enforce strict network isolation:
 * **Intra (Isolated) Subnets:** Host the **RDS Database**. These subnets have **no route to the Internet Gateway or NAT Gateway**. This ensures the data layer is air-gapped from the public internet.
 
 ### 2. Compute Security (EKS)
-* **Least Privilege:** I utilized the `terraform-aws-modules/eks` module which implements IRSA (IAM Roles for Service Accounts). This allows future workloads to assume fine-grained IAM roles rather than using the Node IAM role.
-* **Encryption:** The EBS volumes for the worker nodes are encrypted by default (`encrypted = true`) to protect data at rest.
-* **Access:** The EKS Cluster Endpoint is public for the sake of this assignment's accessibility, but in a production environment, I would restrict `cluster_endpoint_public_access_cidrs` to the corporate VPN IP range.
-* **Architecture:** Used `t4g.medium` (ARM64) as requested. I configured the `ami_type` to `AL2_ARM_64` to ensure compatibility.
+* **Private Cluster:** The EKS control plane endpoint has `endpoint_public_access = false`, meaning it's only accessible from within the VPC. This eliminates external attack vectors against the Kubernetes API server.
+* **Bottlerocket OS:** Node groups use `BOTTLEROCKET_ARM_64` instead of standard Amazon Linux 2. Bottlerocket is purpose-built for containers with a minimal attack surface, immutable infrastructure, and automatic security updates via image-based deployments.
+* **ARM64 Architecture:** Using `t4g.medium` instances provides better price-performance compared to x86, with lower costs and energy efficiency for containerized workloads.
+* **IRSA Enabled:** IAM Roles for Service Accounts (`enable_irsa = true`) allows pod-level IAM permissions without sharing node credentials. Each workload can assume its own IAM role following the principle of least privilege.
+* **Essential Addons:** The cluster includes critical EKS addons configured to use the latest versions:
+  - `coredns` - DNS resolution for service discovery
+  - `kube-proxy` - Network proxy for pod-to-pod communication
+  - `vpc-cni` - IPv6-aware CNI plugin for pod networking
+  - `eks-pod-identity-agent` - Modern pod identity mechanism
+  - `aws-ebs-csi-driver` - Persistent volume support with dedicated IAM role for fine-grained EBS permissions
+* **Node Security:** Additional security group rules allow node-to-node communication on all ports (required for pod networking) and ephemeral port access from the control plane for kubectl exec/logs.
 
 ### 3. Data Security (RDS)
-* **Isolation:** The database is deployed in the `intra_subnets` (Isolated layer).
-* **Security Groups:** Access is strictly whitelisted. The RDS Security Group allows ingress on port 5432 **only** from the EKS Node Security Group ID. No IP-based rules are used, preventing brittle allow-lists.
+* **Isolation:** The database is deployed in the `intra_subnets` (Isolated layer) which have no route to any Internet Gateway or NAT Gateway.
+* **Instance Configuration:** PostgreSQL 14 running on `db.t4g.micro` (ARM Graviton2) for cost efficiency. Storage starts at 20GB with autoscaling up to 50GB.
+* **Security Groups:** Access is strictly whitelisted. The RDS Security Group allows ingress on port 5432 **only** from the Workload Security Group ID. This security group chaining approach (not CIDR-based rules) ensures only authorized EKS workloads can connect.
+* **Development Settings:** The database has `deletion_protection = false` and `skip_final_snapshot = true` for easy teardown during development. In production, these should be set to `true` and `false` respectively.
 
 ### 4. IPv6 Implementation (Dual-Stack)
-To align with modern container networking best practices, I upgraded the cluster to use **IPv6**:
-* **VPC:** configured with a Dual-Stack architecture. AWS assigns a `/56` CIDR block, and we slice `/64` subnets for Public, Private, and Isolated layers.
-* **EKS:** `cluster_ip_family` is set to `ipv6`. This solves the common Kubernetes IP exhaustion problem by assigning a unique, routable IPv6 address to every Pod, removing the need for internal NAT overhead within the cluster.
-* **RDS:** Configured as `DUAL` stack, allowing it to communicate with the IPv6-native EKS pods without translation layers.
+This infrastructure uses a modern **IPv6-native architecture** to eliminate IP exhaustion issues common in large Kubernetes deployments:
+* **VPC:** Configured with `enable_ipv6 = true`, AWS automatically assigns a `/56` IPv6 CIDR block. The VPC module slices this into `/64` subnets for Public, Private, and Intra layers with `ipv6_prefixes` configuration.
+* **IPv6 Egress:** An Egress-Only Internet Gateway (`create_egress_only_igw = true`) provides IPv6 internet access for private subnets without allowing inbound connections, complementing the IPv4 NAT Gateway.
+* **EKS:** The cluster runs in IPv6 mode (`ip_family = "ipv6"`), assigning each pod a unique, routable IPv6 address. This eliminates the need for overlay networking and secondary CIDR blocks that limit cluster scale.
+* **CNI Configuration:** The `create_cni_ipv6_iam_policy = true` flag provisions the correct IAM permissions for the VPC CNI plugin to assign IPv6 addresses to pods.
+* **RDS:** Configured with `network_type = "DUAL"`, allowing the database to accept connections from both IPv4 (EKS nodes) and IPv6 (EKS pods) without translation overhead.
 
 ### 5. Security Group Chaining
 Instead of relying on broad CIDR ranges, I implemented strict **Security Group Chaining** to enforce a Zero Trust network model:
@@ -33,28 +58,136 @@ Instead of relying on broad CIDR ranges, I implemented strict **Security Group C
 3.  **Database SG (`rds-sg`):** It denies all ingress traffic unless it originates specifically from the **Workload SG**.
 
 *Result:* Even if an attacker gains access to the VPC network layer, they cannot connect to the Database unless they have compromised a specific compute node.
+
+## Design Rationale
+
+### Why This File Organization?
+The Terraform code is deliberately split into single-responsibility files rather than using a monolithic configuration:
+
+1. **Separation of Concerns:** Each file handles one infrastructure domain (networking, compute, data, security), making it easier to review and modify specific components without affecting others.
+2. **Team Collaboration:** Different team members can work on networking (vpc.tf) and compute (eks.tf) simultaneously with minimal merge conflicts.
+3. **Testing & Validation:** Isolated files make it easier to validate changes with `terraform plan -target=module.vpc` before applying broader changes.
+4. **Module Reusability:** The clear separation makes it straightforward to extract any component into a reusable Terraform module.
+5. **Standard Convention:** This structure follows HashiCorp's recommended practices and is immediately recognizable to Terraform practitioners.
+
+### Why These Technology Choices?
+
+**Bottlerocket over Amazon Linux 2:**
+- Minimal OS footprint reduces attack surface (no package manager, no SSH by default)
+- Immutable infrastructure with atomic updates reduces configuration drift
+- Purpose-built for containers with optimized boot times and resource usage
+- Automatic security patching via image-based updates
+
+**IPv6-Native Networking:**
+- Solves the "pods per node" limitation imposed by IPv4 secondary CIDR exhaustion
+- Eliminates complex overlay networking and improves performance
+- Each pod gets a routable IP, simplifying network troubleshooting and security policies
+- Future-proofs the infrastructure as IPv4 addresses become scarce
+
+**Private EKS Endpoint:**
+- Eliminates internet-based attack vectors against the Kubernetes API
+- Forces all management traffic through the VPC, creating an audit trail
+- Requires VPN or bastion host for access, enforcing zero-trust principles
+- Prevents accidental exposure of cluster credentials
+
+**Security Group Chaining:**
+- More secure than CIDR-based rules as security groups automatically adjust when resources scale
+- Prevents the need to update rules when adding/removing nodes or pods
+- Creates an explicit dependency graph: Internet → ALB → Workload → Database
+- Easier to audit and understand compared to complex CIDR calculations
+
+**ARM64 (Graviton) Instances:**
+- 20% better price-performance compared to comparable x86 instances
+- Lower power consumption aligns with sustainability goals
+- Wide software compatibility through modern container images
+- Bottlerocket has first-class ARM support
+
 ## Deployment Instructions
 
 ### Prerequisites
-* Terraform >= 1.0
-* AWS CLI configured
+* Terraform >= 1.2
+* AWS CLI configured with appropriate credentials
+* AWS account with permissions to create VPC, EKS, RDS, IAM, and Security Group resources
 
 ### Steps
 1.  **Initialize Terraform:**
     ```bash
     terraform init
     ```
+
 2.  **Plan the deployment:**
     ```bash
     # Pass the DB password securely via CLI or environment variable
     terraform plan -var="db_password=YourSecurePassword123!" -out=tfplan
     ```
+
 3.  **Apply:**
     ```bash
     terraform apply tfplan
     ```
 
+4.  **Grant cluster access to your IAM identity:**
+
+    After the cluster is created, you must add your IAM user or role to the cluster's access configuration with admin permissions. Choose one method:
+
+    **Option A: Using AWS Console**
+    - Navigate to EKS → Clusters → sec-cluster-01 → Access
+    - Click "Create access entry"
+    - Select your IAM principal (user or role)
+    - Add the `AmazonEKSAdminPolicy` access policy
+    - Click "Create"
+
+    **Option B: Using AWS CLI**
+    ```bash
+    # For IAM user
+    aws eks create-access-entry \
+      --cluster-name sec-cluster-01 \
+      --principal-arn arn:aws:iam::ACCOUNT_ID:user/YOUR_USERNAME \
+      --region us-east-2
+
+    aws eks associate-access-policy \
+      --cluster-name sec-cluster-01 \
+      --principal-arn arn:aws:iam::ACCOUNT_ID:user/YOUR_USERNAME \
+      --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy \
+      --access-scope type=cluster \
+      --region us-east-2
+
+    # For IAM role (if using assumed role)
+    aws eks create-access-entry \
+      --cluster-name sec-cluster-01 \
+      --principal-arn arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME \
+      --region us-east-2
+
+    aws eks associate-access-policy \
+      --cluster-name sec-cluster-01 \
+      --principal-arn arn:aws:iam::ACCOUNT_ID:role/YOUR_ROLE_NAME \
+      --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy \
+      --access-scope type=cluster \
+      --region us-east-2
+    ```
+
+5.  **Access the cluster:**
+    ```bash
+    # Update kubeconfig (note: requires VPC access since endpoint is private)
+    aws eks update-kubeconfig --region us-east-2 --name sec-cluster-01
+
+    # Verify access
+    kubectl get nodes
+
+    # If accessing from outside the VPC, you'll need:
+    # - A VPN connection to the VPC, OR
+    # - A bastion host in the VPC, OR
+    # - Temporarily enable public endpoint access
+    ```
+
+### Important Notes
+* **IAM Authentication:** EKS uses IAM for cluster authentication. You must explicitly grant your IAM identity access to the cluster (Step 4) before you can run `kubectl` commands. The Terraform apply does not automatically grant access to any IAM principals.
+* **Private Endpoint:** The EKS cluster endpoint is private by default. You must be connected to the VPC (via VPN, AWS Direct Connect, or bastion host) to run `kubectl` commands.
+* **Database Password:** Never commit the database password to version control. Use environment variables (`TF_VAR_db_password`) or secure secret management solutions.
+* **Region:** The default region is `us-east-2`. Change the `region` variable if deploying elsewhere.
+
 ### Cleanup
 To destroy resources and avoid costs:
 ```bash
 terraform destroy -var="db_password=YourSecurePassword123!"
+```
