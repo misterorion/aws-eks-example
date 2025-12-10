@@ -13,6 +13,7 @@ The Terraform configuration is organized into logical, single-purpose files for 
 - **security_groups.tf** - Three-tier security group architecture (ALB → Workload → Database)
 - **eks.tf** - EKS cluster configuration, managed node groups, addons, and IAM roles
 - **rds.tf** - PostgreSQL database instance in isolated subnets
+- **secrets.tf** - AWS Secrets Manager secret for auto-generated RDS password
 
 This separation follows Terraform best practices by grouping related resources while keeping files focused and manageable. Each file can be understood independently while the module dependencies create clear resource relationships.
 
@@ -41,6 +42,7 @@ I utilized a **3-tier subnet strategy** to enforce strict network isolation:
 * **Isolation:** The database is deployed in the `intra_subnets` (Isolated layer) which have no route to any Internet Gateway or NAT Gateway.
 * **Instance Configuration:** PostgreSQL 14 running on `db.t4g.micro` (ARM Graviton2) for cost efficiency. Storage starts at 20GB with autoscaling up to 50GB.
 * **Security Groups:** Access is strictly whitelisted. The RDS Security Group allows ingress on port 5432 **only** from the Workload Security Group ID. This security group chaining approach (not CIDR-based rules) ensures only authorized EKS workloads can connect.
+* **Secrets Management:** The database master password is automatically generated using a cryptographically secure random generator (32 characters) and stored in AWS Secrets Manager. This eliminates the need to pass passwords via CLI arguments or environment variables, and provides secure rotation capabilities.
 * **Development Settings:** The database has `deletion_protection = false` and `skip_final_snapshot = true` for easy teardown during development. In production, these should be set to `true` and `false` respectively.
 
 ### 4. IPv6 Implementation (Dual-Stack)
@@ -102,6 +104,14 @@ The Terraform code is deliberately split into single-responsibility files rather
 - Wide software compatibility through modern container images
 - Bottlerocket has first-class ARM support
 
+**AWS Secrets Manager for Passwords:**
+- Eliminates password management burden - automatically generated with cryptographic randomness
+- No risk of accidentally committing passwords to version control
+- Centralized access control via IAM policies
+- Enables automatic password rotation without code changes
+- Provides audit trail of secret access via CloudTrail
+- Applications can retrieve secrets programmatically using IAM roles (no hardcoded credentials)
+
 ## Deployment Instructions
 
 ### Prerequisites
@@ -117,14 +127,15 @@ The Terraform code is deliberately split into single-responsibility files rather
 
 2.  **Plan the deployment:**
     ```bash
-    # Pass the DB password securely via CLI or environment variable
-    terraform plan -var="db_password=YourSecurePassword123!" -out=tfplan
+    terraform plan -out=tfplan
     ```
 
 3.  **Apply:**
     ```bash
     terraform apply tfplan
     ```
+
+    Note: A secure random password will be automatically generated and stored in AWS Secrets Manager during the apply.
 
 4.  **Grant cluster access to your IAM identity:**
 
@@ -180,14 +191,42 @@ The Terraform code is deliberately split into single-responsibility files rather
     # - Temporarily enable public endpoint access
     ```
 
+6.  **Retrieve the RDS password:**
+
+    The database password is stored in AWS Secrets Manager. You can retrieve it using:
+
+    ```bash
+    # Get the secret name from Terraform outputs
+    terraform output rds_secret_name
+
+    # Retrieve the password
+    aws secretsmanager get-secret-value \
+      --secret-id $(terraform output -raw rds_secret_name) \
+      --query SecretString \
+      --output text \
+      --region us-east-2
+
+    # Or use the pre-formatted command from outputs
+    $(terraform output -raw retrieve_rds_password)
+    ```
+
+    **Connection Details:**
+    - **Endpoint:** `terraform output rds_endpoint`
+    - **Database:** `appdb` (or your custom `db_name` variable)
+    - **Username:** `dbadmin` (or your custom `db_username` variable)
+    - **Password:** Retrieved from Secrets Manager (see above)
+
 ### Important Notes
 * **IAM Authentication:** EKS uses IAM for cluster authentication. You must explicitly grant your IAM identity access to the cluster (Step 4) before you can run `kubectl` commands. The Terraform apply does not automatically grant access to any IAM principals.
 * **Private Endpoint:** The EKS cluster endpoint is private by default. You must be connected to the VPC (via VPN, AWS Direct Connect, or bastion host) to run `kubectl` commands.
-* **Database Password:** Never commit the database password to version control. Use environment variables (`TF_VAR_db_password`) or secure secret management solutions.
+* **Database Password:** The RDS password is automatically generated and securely stored in AWS Secrets Manager. You never need to manually create or manage the password. Retrieve it using the AWS CLI as shown in Step 6.
+* **Secret Deletion:** When destroying the infrastructure, the Secrets Manager secret has a 7-day recovery window. If you need to recreate the infrastructure immediately, you may need to manually delete the secret or wait for the recovery period to expire.
 * **Region:** The default region is `us-east-2`. Change the `region` variable if deploying elsewhere.
 
 ### Cleanup
 To destroy resources and avoid costs:
 ```bash
-terraform destroy -var="db_password=YourSecurePassword123!"
+terraform destroy
 ```
+
+No password required! The secret will be marked for deletion with a 7-day recovery window.

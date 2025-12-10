@@ -30,11 +30,3 @@ variable "db_username" {
   default     = "dbadmin"
   sensitive   = true
 }
-
-# In a real scenario, never default the password.
-# Pass this via CLI: -var="db_password=..." or env vars.
-variable "db_password" {
-  description = "Database master password"
-  type        = string
-  sensitive   = true
-}

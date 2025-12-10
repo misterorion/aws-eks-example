@@ -16,7 +16,7 @@ module "db" {
 
   db_name  = var.db_name
   username = var.db_username
-  password = var.db_password
+  password = random_password.db_password.result
   port     = 5432
 
   network_type = "DUAL"

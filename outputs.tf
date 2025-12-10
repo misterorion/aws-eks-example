@@ -35,3 +35,18 @@ output "rds_endpoint" {
   description = "RDS Connection Endpoint"
   value       = module.db.db_instance_endpoint
 }
+
+output "rds_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing the RDS password"
+  value       = aws_secretsmanager_secret.db_password.arn
+}
+
+output "rds_secret_name" {
+  description = "Name of the Secrets Manager secret containing the RDS password"
+  value       = aws_secretsmanager_secret.db_password.name
+}
+
+output "retrieve_rds_password" {
+  description = "Command to retrieve the RDS password from Secrets Manager"
+  value       = "aws secretsmanager get-secret-value --secret-id ${aws_secretsmanager_secret.db_password.name} --query SecretString --output text --region ${var.region}"
+}
