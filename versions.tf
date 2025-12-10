@@ -14,8 +14,8 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Environment = "take-home"
-      Project     = "security-engineer-assessment"
+      Environment = "sandbox"
+      Project     = "aws-eks-example"
       ManagedBy   = "Terraform"
     }
   }

@@ -23,6 +23,13 @@ module "eks" {
     vpc-cni = {
       most_recent = true
     }
+    eks-pod-identity-agent = {
+      most_recent = true
+    }
+    aws-ebs-csi-driver = {
+      most_recent = true
+      service_account_role_arn = aws_iam_role.ebs_csi.arn
+    }
   }
 
   eks_managed_node_groups = {
@@ -48,15 +55,6 @@ module "eks" {
       }
 
       vpc_security_group_ids = [module.workload_sg.security_group_id]
-
-      user_data = base64encode(<<-EOT
-      [settings.kubernetes]
-      max-pods = 58
-
-      [settings.kernel]
-      lockdown = "integrity"
-    EOT
-      )
     }
   }
 
@@ -83,4 +81,31 @@ module "eks" {
       self        = true
     }
   }
+}
+
+# IAM Role for EBS CSI Driver
+resource "aws_iam_role" "ebs_csi" {
+  name = "${module.eks.cluster_name}-ebs-csi-driver"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Effect = "Allow"
+      Principal = {
+        Federated = module.eks.oidc_provider_arn
+      }
+      Condition = {
+        StringEquals = {
+          "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  role       = aws_iam_role.ebs_csi.name
 }

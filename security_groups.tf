@@ -49,7 +49,6 @@ module "alb_sg" {
 # Private: Accepts traffic ONLY from the ALB Security Group
 module "workload_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "~> 5.0"
 
   name        = "workload-sg"
   description = "Security Group for EKS Workload Pods/Nodes"
@@ -74,7 +73,6 @@ module "workload_sg" {
 # Isolated: Accepts traffic ONLY from the Workload SG
 module "db_sg" {
   source  = "terraform-aws-modules/security-group/aws"
-  version = "~> 5.0"
 
   name        = "rds-sg"
   description = "Security Group for RDS Database"
