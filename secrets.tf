@@ -15,8 +15,9 @@ resource "aws_secretsmanager_secret" "db_password" {
   recovery_window_in_days = 7
 
   tags = {
-    Database = var.db_name
-    Cluster  = var.cluster_name
+    Component = "RDS-Password"
+    Database  = var.db_name
+    Cluster   = var.cluster_name
   }
 }
 

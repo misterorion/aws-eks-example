@@ -51,7 +51,7 @@ module "eks" {
 
       labels = {
         role        = "general"
-        environment = "demo"
+        environment = "sandbox"
         arch        = "arm64"
         nodegroup   = "bottlerocket-arm64"
       }
@@ -88,6 +88,11 @@ module "eks" {
 # IAM Role for EBS CSI Driver
 resource "aws_iam_role" "ebs_csi" {
   name = "${module.eks.cluster_name}-ebs-csi-driver"
+
+  tags = {
+    Component = "EBS-CSI-Driver"
+    Cluster   = var.cluster_name
+  }
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
