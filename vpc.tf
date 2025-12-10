@@ -1,3 +1,5 @@
+# VPC with dual-stack (IPv4/IPv6) networking, public/private/intra subnets, and NAT gateway.
+
 module "vpc" {
   source = "terraform-aws-modules/vpc/aws"
 

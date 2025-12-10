@@ -1,3 +1,5 @@
+# EKS cluster with IPv6 networking, Bottlerocket ARM64 nodes, and EBS CSI driver with IAM role.
+
 module "eks" {
   source = "terraform-aws-modules/eks/aws"
 
@@ -27,7 +29,7 @@ module "eks" {
       most_recent = true
     }
     aws-ebs-csi-driver = {
-      most_recent = true
+      most_recent              = true
       service_account_role_arn = aws_iam_role.ebs_csi.arn
     }
   }

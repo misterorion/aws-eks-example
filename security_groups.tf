@@ -1,7 +1,9 @@
+# Three-tier security group architecture: ALB (public), workload (private), and database (isolated).
+
 # 1. Load Balancer Security Group
 # Public facing: Allows HTTP/HTTPS from everywhere (IPv4 + IPv6)
 module "alb_sg" {
-  source  = "terraform-aws-modules/security-group/aws"
+  source = "terraform-aws-modules/security-group/aws"
 
   name        = "alb-sg"
   description = "Public Load Balancer Security Group"
@@ -48,7 +50,7 @@ module "alb_sg" {
 # 2. Workload (Compute) Security Group
 # Private: Accepts traffic ONLY from the ALB Security Group
 module "workload_sg" {
-  source  = "terraform-aws-modules/security-group/aws"
+  source = "terraform-aws-modules/security-group/aws"
 
   name        = "workload-sg"
   description = "Security Group for EKS Workload Pods/Nodes"
@@ -72,7 +74,7 @@ module "workload_sg" {
 # 3. Database Security Group
 # Isolated: Accepts traffic ONLY from the Workload SG
 module "db_sg" {
-  source  = "terraform-aws-modules/security-group/aws"
+  source = "terraform-aws-modules/security-group/aws"
 
   name        = "rds-sg"
   description = "Security Group for RDS Database"

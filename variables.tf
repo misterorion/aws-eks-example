@@ -1,3 +1,5 @@
+# Input variables for configuring AWS region, VPC networking, EKS cluster, and RDS database.
+
 variable "region" {
   description = "AWS region"
   type        = string

@@ -1,5 +1,7 @@
+# PostgreSQL RDS database instance in isolated subnets with automated backups disabled.
+
 module "db" {
-  source  = "terraform-aws-modules/rds/aws"
+  source = "terraform-aws-modules/rds/aws"
 
   identifier = "sec-assignment-db"
 

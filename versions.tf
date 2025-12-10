@@ -1,3 +1,5 @@
+# Terraform and provider version constraints, AWS provider configuration with default tags.
+
 terraform {
   required_version = ">= 1.2"
 
